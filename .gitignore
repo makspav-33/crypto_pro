@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+*.log
+.npm-cache/
+*.tsbuildinfo
+.DS_Store
