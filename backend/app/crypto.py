@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import Session
 from .ciphers import transform, validate_key
+from .sdes import transform_text
 from .history import record_operation
 
 router = APIRouter(prefix="/api/crypto", tags=["Crypto Lab"])
@@ -24,11 +25,21 @@ class TextInput(BaseModel):
     language: Literal["UA", "EN"] = "UA"
 
 
+class SDesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    algorithm: Literal["sdes"]
+    key: str
+    text: str = Field(max_length=80000)
+
+
 @router.post("/text/{operation}")
-def text_operation(operation: Operation, data: TextInput, session: Session, response: Response):
+def text_operation(operation: Operation, data: TextInput | SDesInput, session: Session, response: Response):
     response.headers["Cache-Control"] = "no-store"
     try:
-        result = transform(data.text, data.algorithm, data.key, operation == "decrypt", language=data.language)
+        if isinstance(data, SDesInput):
+            result = transform_text(data.text, data.key, operation == "decrypt")
+        else:
+            result = transform(data.text, data.algorithm, data.key, operation == "decrypt", language=data.language)
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     record_operation(session[0]["id"], data.algorithm, operation, "text")

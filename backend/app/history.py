@@ -20,7 +20,7 @@ def record_operation(user_id: int, algorithm: str, operation: str, data_type: st
 
 @router.get("")
 def list_history(session: Session, response: Response, search: str = Query(default="", max_length=255),
-                 algorithm: Literal['caesar', 'horizontal', 'vertical', 'combined'] | None = None,
+                 algorithm: Literal['caesar', 'horizontal', 'vertical', 'combined', 'sdes'] | None = None,
                  operation: Literal['encrypt', 'decrypt'] | None = None,
                  data_type: Literal['text', 'file'] | None = None,
                  limit: int = Query(default=25, ge=1, le=100), offset: int = Query(default=0, ge=0)):

@@ -31,7 +31,7 @@ let socket
 try {
   const apiPort = await port(), uiPort = await port()
   const apiUrl = `http://127.0.0.1:${apiPort}`, uiUrl = `http://127.0.0.1:${uiPort}`
-  start(join(root, 'backend/.venv/Scripts/python.exe'), ['-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', String(apiPort)], {
+  start(process.env.DIGITALVAULT_TEST_PYTHON || join(root, 'backend/.venv/Scripts/python.exe'), ['-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', String(apiPort)], {
     env: { ...process.env, JWT_SECRET: randomBytes(48).toString('hex'), DATABASE_PATH: join(temporary, 'ui.db'), CORS_ORIGINS: uiUrl, JWT_TTL_MINUTES: '15' },
   })
   start(process.execPath, [join(root, 'frontend/node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(uiPort)], { cwd: join(root, 'frontend'), env: { ...process.env, VITE_API_URL: apiUrl } })
@@ -77,6 +77,8 @@ try {
   await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
   await wait(`location.hash === '#profile' && !!document.querySelector('.profile-identity')`, 'keyboard profile navigation')
   await check(`document.querySelector('details').open === false && document.querySelector('.profile-identity').textContent.includes('browser@example.com')`, 'JWT collapsed and real profile')
+  await check(`[...document.querySelectorAll('.jwt-block h3')].map(el => el.textContent).join('/') === 'Header/Payload/Signature' &&
+    document.querySelector('.jwt-block:last-child pre').textContent === '••••••••' && !!document.querySelector('[role=progressbar]')`, 'JWT parts, masked signature and timer')
 
   await navigate('lab')
   await fill('textarea', 'Hello Привіт! 123'); await fill('.crypto-form input', '3')
@@ -87,6 +89,79 @@ try {
   await check(`!document.querySelector('details.crypto-step').open`, 'interactive step collapse')
   await evaluate(`document.querySelector('[data-algorithm=combined]').click()`); await fill('.crypto-form input', '1324'); await submit()
   await wait(`document.querySelectorAll('details.crypto-step').length === 2`, 'combined intermediate steps')
+
+  await evaluate(`document.querySelector('[data-algorithm=sdes]').click()`)
+  await submit()
+  await wait(`document.querySelector('[role=alert]')?.textContent.includes('Введіть відкритий текст')`, 'S-DES empty input')
+  await fill('textarea', 'U'); await submit()
+  await wait(`document.querySelector('.result-panel pre')?.textContent === 'C1'`, 'S-DES known block')
+  await check(`document.querySelector('.crypto-step').textContent.includes('10100100')`, 'S-DES key schedule')
+  await fill('textarea', 'C1')
+  await evaluate(`document.querySelector('button[value=decrypt]').click()`)
+  await wait(`document.querySelector('.result-panel pre')?.textContent === 'U'`, 'S-DES decryption')
+
+  await evaluate(`document.querySelector('[data-algorithm=dh]').click()`)
+  const panel = '[role=tabpanel]:not([hidden])'
+  const tab = index => evaluate(`document.querySelector('#dh-tab-${index}').click()`)
+  const press = label => evaluate(`[...document.querySelectorAll('${panel} button')].find(el => el.textContent === ${JSON.stringify(label)}).click()`)
+  const next = () => press('Наступний крок')
+  const dhStatus = `document.querySelector('${panel} [role=status]')`
+  const dhError = `document.querySelector('${panel} [role=alert]')`
+  await check(`document.querySelector('#dh-tab-0').ariaSelected === 'true'`, 'DH opens on overview')
+  await tab(1)
+  async function checkExchange(A, B, secret) {
+    await press('Почати')
+    await next()
+    await check(`document.querySelector('${panel} .dh-wire').textContent === ''`, 'DH exchange still pending')
+    await next()
+    await check(`document.querySelector('${panel} .dh-wire').textContent === 'A = ${A} →← B = ${B}'`, 'DH public keys')
+    await next()
+    await next()
+    await check(`${dhStatus}?.textContent.endsWith('${secret} = ${secret}')`, 'DH shared secret')
+  }
+  await checkExchange(8, 19, 2)
+  for (const [field, invalid, valid] of [['p', '21', '23'], ['g', '4', '5'], ['a', '', '6'], ['b', '22', '15']]) {
+    await fill(`input[name=${field}]`, invalid)
+    await press('Почати')
+    await check(`!!${dhError} && !${dhStatus}`, 'DH rejects invalid ' + field)
+    await fill(`input[name=${field}]`, valid)
+  }
+  for (const [field, value] of Object.entries({p: '17', g: '3', a: '4', b: '5'})) {
+    await fill(`input[name=${field}]`, value)
+  }
+  await checkExchange(13, 5, 13)
+  for (let run = 0; run < 2; run++) {
+    await press('Згенерувати приватні ключі')
+    await check(`!${dhStatus}`, 'DH regeneration clears result')
+    const a = BigInt(await evaluate(`document.querySelector('input[name=a]').value`))
+    const b = BigInt(await evaluate(`document.querySelector('input[name=b]').value`))
+    assert.ok(a >= 1n && a <= 15n && b >= 1n && b <= 15n)
+    await checkExchange(3n ** a % 17n, 3n ** b % 17n, 3n ** (a * b) % 17n)
+  }
+
+  await tab(2)
+  for (let run = 0; run < 2; run++) {
+    await press('Почати')
+    await next()
+    await next()
+    await check(`!document.querySelector('${panel}').innerText.includes('Очікується')`, 'MITM original keys')
+    await tab(1)
+    await check(`!!${dhStatus}`, 'direct exchange preserved')
+    await tab(2)
+    await next()
+    await check(`document.querySelector('${panel}').innerText.includes('Отримано X')`, 'MITM received key')
+    await next()
+    const powers = await evaluate(`[...document.querySelectorAll('${panel} .dh-math')].map(el => [el.querySelector('sup').previousSibling.textContent,el.querySelector('sup').textContent,el.querySelector('strong').textContent])`)
+    assert.equal(powers.length, 8)
+    for (const [base, exponent, result] of powers) assert.equal(BigInt(base) ** BigInt(exponent) % 23n, BigInt(result))
+    await next()
+    await check(`document.querySelectorAll('${panel} .message.success').length === 2 && document.querySelector('${panel} .message.error').textContent.includes('≠')`, 'two distinct verified MITM pairs')
+    await press('Скинути')
+    await check(`!document.querySelector('${panel} .dh-math') && !${dhStatus}`, 'reset clears MITM keys')
+  }
+  await tab(1)
+  await press('Скинути')
+  await check(`!${dhStatus} && !document.querySelector('${panel} .dh-math')`, 'reset clears direct exchange')
 
   await navigate('files')
   const filePath = join(temporary, 'sample.txt')
@@ -102,9 +177,13 @@ try {
   await evaluate(`document.querySelector('.selected-file button').click()`)
   await check(`!document.querySelector('.selected-file')`, 'clear selected file')
   await navigate('history')
-  await wait(`document.querySelectorAll('.history-table tbody tr').length === 3`, 'History records real operations')
+  await wait(`document.querySelectorAll('.history-table tbody tr').length === 5`, 'History records real operations')
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
   await navigate('lab')
+  await evaluate(`document.querySelector('[data-algorithm=dh]').click()`)
+  await tab(2)
+  await press('Почати')
+  for (let i = 0; i < 5; i++) await next()
   await check(`document.documentElement.scrollWidth <= innerWidth`, 'mobile layout has no horizontal overflow')
   await evaluate(`document.querySelector('.mobile-menu').click()`)
   await check(`document.querySelector('.sidebar').classList.contains('open')`, 'mobile menu opens')
@@ -118,6 +197,28 @@ try {
   await wait(`!!document.querySelector('[role=alert]')`, 'duplicate email error')
   await check(`location.hash === '#register' && !document.querySelector('.sidebar')`, 'duplicate registration creates no session')
   await navigate('login'); await login()
+  await navigate('lab')
+  await fill('textarea', 'session test')
+  // Hold one old request until the next login, including when both tokens were
+  // issued in the same second. Other requests still use the real backend.
+  await evaluate(`(() => {
+    const original = window.fetch
+    window.fetch = (...args) => {
+      if (!String(args[0]).includes('/crypto/text/encrypt')) return original(...args)
+      window.fetch = original
+      return new Promise(resolve => { window.releaseOldRequest = () => resolve(new Response(null, {status: 401})) })
+    }
+  })()`)
+  await submit()
+  await wait(`typeof window.releaseOldRequest === 'function'`, 'old session request pending')
+  await evaluate(`document.querySelector('.logout-button').click()`)
+  await wait(`!!document.querySelector('[name=email]')`, 'old session closed')
+  await login()
+  await evaluate(`window.releaseOldRequest()`)
+  await navigate('profile')
+  await wait(`!!document.querySelector('.profile-identity')`, 'late 401 preserves the new session')
+  await evaluate(`(() => { const now = Date.now.bind(Date); Date.now = () => now() + 16 * 60 * 1000; window.dispatchEvent(new Event('focus')) })()`)
+  await wait(`location.hash === '#login' && !document.querySelector('.sidebar') && document.body.innerText.includes('Термін дії сесії завершився')`, 'expired session closes protected page')
   console.log('PASS: Register auto-login, Login, Logout, reload protection, duplicate email, profile keyboard navigation, collapsed JWT, Crypto Lab steps, TXT upload/removal, History, mobile layout.')
 } finally {
   socket?.close()

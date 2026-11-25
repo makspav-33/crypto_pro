@@ -1,6 +1,6 @@
 export interface User { id: number; username: string; email: string; created_at: string }
 export interface Session { access_token: string; expires_at: number; user: User }
-export interface TokenInfo { header: { alg: string; typ: string }; payload: { sub: string; name?: string; email?: string; iat: number; exp: number }; signature: { verified: boolean; value: string; algorithm: string } }
+export interface TokenInfo { header: { alg: string; typ?: string }; payload: { sub: string; name?: string; email?: string; iat: number; exp: number }; signature: { verified: boolean; value: string; algorithm: string } }
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }

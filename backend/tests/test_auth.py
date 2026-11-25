@@ -107,6 +107,8 @@ class AuthenticationTests(unittest.TestCase):
         status, info, _ = self.request("/auth/token-info", token=token)
         self.assertEqual(status, 200)
         self.assertTrue(info["signature"]["verified"])
+        self.assertEqual(info["header"], {"alg": "HS256", "typ": "JWT"})
+        self.assertEqual(info["signature"]["value"], "Приховано")
         self.assertEqual(info["payload"], claims)
         self.assertNotIn(token, json.dumps(info))
         self.assertNotIn(self.secret, json.dumps(info))
@@ -117,6 +119,16 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.request("/auth/me", token=expired)[0], 401)
         forged = jwt.encode(claims, secrets.token_urlsafe(48), algorithm="HS256")
         self.assertEqual(self.request("/auth/me", token=forged)[0], 401)
+        for path in ("/auth/me", "/auth/token-info", "/history"):
+            for rejected in (expired, forged, "invalid"):
+                status, _, headers = self.request(path, token=rejected)
+                self.assertEqual(status, 401)
+                self.assertEqual(headers["WWW-Authenticate"], "Bearer")
+        for overrides in ({"sub": None}, {"sub": "0" + claims["sub"]}, {"exp": []}, {"iat": True}):
+            invalid = jwt.encode({**claims, **overrides}, self.secret, algorithm="HS256")
+            self.assertEqual(self.request("/auth/me", token=invalid)[0], 401)
+        no_type = jwt.encode(claims, self.secret, algorithm="HS256", headers={"typ": None})
+        self.assertEqual(self.request("/auth/token-info", token=no_type)[1]["header"], {"alg": "HS256"})
         # Logout discards the in-memory token: subsequent requests carry no Authorization.
         self.assertEqual(self.request("/auth/me")[0], 401)
 
@@ -127,6 +139,19 @@ class AuthenticationTests(unittest.TestCase):
             {"username": "ok_user", "email": "valid@example.com", "password": "short"},
         ):
             self.assertEqual(self.request("/auth/register", data)[0], 422)
+
+    def test_expiry_closes_an_active_session(self):
+        credentials = {"email": "expiry@example.com", "password": "testing-password-123"}
+        user = self.request("/auth/register", {**credentials, "username": "expiry_user"})[1]
+        now = int(time.time())
+        deadline = now + 2
+        short_token = jwt.encode({"sub": str(user["id"]), "iat": now, "exp": deadline},
+                                 self.secret, algorithm="HS256")
+        self.assertEqual(self.request("/auth/me", token=short_token)[0], 200)
+        time.sleep(max(0, deadline - time.time()))
+        self.assertEqual(self.request("/auth/me", token=short_token)[0], 401)
+        fresh = self.request("/auth/login", credentials)[1]["access_token"]
+        self.assertEqual(self.request("/auth/me", token=fresh)[1], user)
 
     def test_crypto_api(self):
         credentials = {"email": "crypto@example.com", "password": "testing-password-123"}

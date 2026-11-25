@@ -57,19 +57,23 @@ def current_session(credentials: Annotated[HTTPAuthorizationCredentials | None, 
     if credentials is None:
         raise unauthorized()
     try:
-        claims = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"],
-                            options={"require": ["sub", "iat", "exp"]})
-        if not claims["sub"].isdigit() or type(claims["iat"]) is not int or type(claims["exp"]) is not int:
+        verified = jwt.decode_complete(credentials.credentials, JWT_SECRET, algorithms=["HS256"],
+                                       options={"require": ["sub", "iat", "exp"]})
+        claims = verified["payload"]
+        subject = claims["sub"]
+        if not isinstance(subject, str) or not subject.isascii() or not subject.isdecimal():
+            raise unauthorized()
+        if type(claims["iat"]) is not int or type(claims["exp"]) is not int:
             raise unauthorized()
         if claims["exp"] <= claims["iat"]:
             raise unauthorized()
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, TypeError, ValueError, OverflowError):
         raise unauthorized() from None
     with get_connection() as connection:
         user = connection.execute("SELECT id, username, email, created_at FROM users WHERE id = ?", (claims["sub"],)).fetchone()
-    if user is None:
+    if user is None or str(user["id"]) != subject:
         raise unauthorized()
-    return dict(user), claims
+    return dict(user), claims, {k: verified["header"][k] for k in ("alg", "typ") if k in verified["header"]}
 
 
 Session = Annotated[tuple, Depends(current_session)]
@@ -120,6 +124,6 @@ def me(session: Session, response: Response):
 def token_info(session: Session, response: Response):
     response.headers["Cache-Control"] = "no-store"
     claims = session[1]
-    return {"header": {"alg": "HS256", "typ": "JWT"},
+    return {"header": session[2],
             "payload": {key: claims[key] for key in ("sub", "name", "email", "iat", "exp") if key in claims},
             "signature": {"verified": True, "value": "Приховано", "algorithm": "HMAC-SHA256"}}

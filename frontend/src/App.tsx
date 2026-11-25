@@ -73,9 +73,19 @@ function Profile({ session, logout }: { session: Session; logout: (reason?: stri
 export default function App() {
   const [page, setPage] = useState(getPage)
   const [session, setSession] = useState<Session | null>(null)
+  const activeSession = useRef<Session | null>(null)
   const [notice, setNotice] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
-  const logout = (reason = '') => { setSession(null); setNotice(reason); setMenuOpen(false); location.hash = 'login' }
+  const logout = (reason = '') => {
+    // A delayed 401 from an earlier login belongs only to that session.
+    if (activeSession.current !== session) return
+    activeSession.current = null
+    setSession(null); setNotice(reason); setMenuOpen(false); location.hash = 'login'
+  }
+  function login(next: Session) {
+    activeSession.current = next
+    setSession(next); setNotice(''); location.hash = 'dashboard'
+  }
   useEffect(() => {
     const handler = () => { setPage(getPage()); setMenuOpen(false) }
     window.addEventListener('hashchange', handler)
@@ -87,12 +97,18 @@ export default function App() {
   }, [session, page])
   useEffect(() => {
     if (!session) return
-    const expire = () => { if (Date.now() >= session.expires_at * 1000) logout('Термін дії сесії завершився. Увійдіть повторно.') }
-    const timer = setTimeout(expire, Math.max(0, session.expires_at * 1000 - Date.now()))
+    let timer: ReturnType<typeof setTimeout>
+    const expire = () => {
+      clearTimeout(timer)
+      const remaining = session.expires_at * 1000 - Date.now()
+      if (remaining <= 0) logout('Термін дії сесії завершився. Увійдіть повторно.')
+      else timer = setTimeout(expire, remaining)
+    }
+    expire()
     window.addEventListener('focus', expire)
     return () => { clearTimeout(timer); window.removeEventListener('focus', expire) }
   }, [session])
-  if (!session || session.expires_at * 1000 <= Date.now()) return <AuthForm key={page === 'register' ? 'register' : 'login'} register={page === 'register'} notice={notice} onLogin={s => { setSession(s); setNotice(''); location.hash = 'dashboard' }} />
+  if (!session || session.expires_at * 1000 <= Date.now()) return <AuthForm key={page === 'register' ? 'register' : 'login'} register={page === 'register'} notice={notice} onLogin={login} />
   const active = modules.find(m => m.id === page) || modules[0]
   return <div className="app-shell"><button className="mobile-menu" aria-label="Меню" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button><aside className={menuOpen ? 'sidebar open' : 'sidebar'}><a href="#dashboard" className="brand"><span className="brand-icon"><Shield /></span>Digital<span>Vault</span><span className="brand-dot">.</span></a><nav aria-label="Основна навігація">{modules.filter(m => m.id !== 'profile').map(m => <a key={m.id} href={`#${m.id}`} className={`nav-link ${active.id === m.id ? 'active' : ''}`} aria-current={active.id === m.id ? 'page' : undefined}><m.icon size={19} /><span>{m.label}</span></a>)}</nav><div className="sidebar-bottom"><a href="#profile" className={`local-user profile-link ${active.id === 'profile' ? 'selected' : ''}`} aria-label="Профіль"><div className="avatar"><UserRound size={18} /></div><div className="user-summary">{session.user.username}<small>{session.user.email}</small></div></a><button className="logout-button" onClick={() => logout()}><LogOut size={16} /> Вийти</button></div></aside><div className="main-shell"><main><div className="page-heading"><div><h1><Shield className="heading-icon" size={23} aria-hidden="true" />{active.id === 'dashboard' ? `Вітаємо, ${session.user.username}` : active.label}<span>.</span></h1>{active.id === 'dashboard' && <p className="dashboard-subtitle">Ваші операції, інструменти й безпека — в одному просторі.</p>}</div></div>
   {active.id === 'lab' || active.id === 'files' ? <CryptoLab key={active.id} token={session.access_token} files={active.id === 'files'} logout={logout} /> : active.id === 'profile' ? <Profile session={session} logout={logout} /> : <Activity key={active.id} token={session.access_token} dashboard={active.id === 'dashboard'} logout={logout} />}

@@ -5,7 +5,7 @@ import { api, ApiError } from './api'
 interface Entry { id: number; created_at: string; algorithm: string; operation: string; data_type: string; filename: string | null; status: string }
 interface History { items: Entry[]; total: number }
 interface Stats { total_operations: number; encryptions: number; decryptions: number; files_processed: number; most_used_algorithm: string | null; algorithms: { algorithm: string; count: number }[]; activity: { date: string; count: number }[]; recent: Entry[] }
-const names: Record<string, string> = { caesar: 'Шифр Цезаря', horizontal: 'Горизонтальна перестановка', vertical: 'Вертикальна перестановка', combined: 'Комбінована перестановка' }
+const names: Record<string, string> = { caesar: 'Шифр Цезаря', horizontal: 'Горизонтальна перестановка', vertical: 'Вертикальна перестановка', combined: 'Комбінована перестановка', sdes: 'S-DES' }
 function MetricIcon({ index }: { index: number }) { const Icon = [Layers, LockKeyhole, UnlockKeyhole, FileKey, ShieldCheck][index]; return <Icon size={16} aria-hidden="true" /> }
 const formatDate = (date: string) => new Date(date).toLocaleString('uk-UA')
 

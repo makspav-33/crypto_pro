@@ -106,7 +106,7 @@ h1 { font-size: clamp(26px,2.5vw,37px); font-weight: 600; letter-spacing: -1.1px
 .session-time time { font-size: 36px; letter-spacing: -1.2px; text-shadow: 0 2px 12px #38bdf810; }
 .session-progress { height: 6px; background: #7ca8d11c; }
 .session-progress>div { background: linear-gradient(90deg,#4ca4d6,#9673db); }
-.session-security .jwt-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.session-security .jwt-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .jwt-block { padding: 0; border-radius: 10px; border-color: #7e9ac52c; overflow: hidden; }
 .jwt-block h3 { margin: 0; padding: 12px 15px; border-bottom: 1px solid #7896c026; background: #19263b; color: #a6cde7; font: 11px var(--terminal-mono); }
 .jwt-block h3::before { content: '•'; margin-right: 8px; color: #8b88ce; }
